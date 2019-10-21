@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+import sys
+import os
+import time
+import math
+
+import yaml
+import boto3
+
+# if this is running in the pytest suite, symlink destination names have been adjusted to make importing easier
+if 'pytest' in sys.modules:
+    from base_adjust import Adjust  # adjust.py renamed to base adjust to allow this file to be imported normally for testing
+else:
+    from adjust import Adjust
+
+DESC = "EC2 Fargate adjust driver for Opsani Optune"
+VERSION = "0.0.1"
+HAS_CANCEL = False
+
+CPU = { 256, 512, 1024, 2048, 4096 }
+MEM = { 512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192 }
+MEM_LOW = 4096
+MEM_HI = 30720
+MEM_INC = 1024
+# CPU_MEM_COMBOS = {
+#     256: lambda mem: mem in [512, 1024, 2048],
+#     512: lambda mem: mem in [1024, 2048, 3072, 4096],
+#     1024: lambda mem: mem in [2048, 3072, 4096, 5120, 6144, 7168, 8192],
+#     2048: lambda mem: mem >= 4096 and mem <= 16384 and mem % 1024 == 0,
+#     4096: lambda mem: mem >= 8192 and mem <= 30720 and mem % 1024 == 0
+# }
+
+config_path = os.environ.get('OPTUNE_CONFIG', './config.yaml')
+
+class FargateDriver(Adjust):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not (self.args.info or self.args.version):
+            self.config = self.load_config()
+            self.check_config(self.config)
+            self.ecs = boto3.client('ecs')
+
+    @staticmethod
+    def load_config():
+        try:
+            config = yaml.safe_load(open(config_path))
+        except yaml.YAMLError as e:
+            raise Exception('Could not parse config file located at "{}". '
+                            'Please check its contents. Error: {}'.format(config_path, str(e)))
+        return config    
+
+    @staticmethod
+    def check_config(config):
+        if not os.path.isdir('/root/.aws') \
+        and not os.path.isdir('{}/.aws'.format(os.path.expanduser('~'))) \
+        and not os.popen("curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/").read():
+            assert os.environ.get('AWS_ACCESS_KEY_ID', '') != '' and os.environ.get('AWS_SECRET_ACCESS_KEY', '') != '', 'No AWS access key was provided. ' \
+                                            'Please refer to README.md.'
+            assert os.environ.get('AWS_DEFAULT_REGION', '') != '', 'No Amazon S3 default region was provided. ' \
+                                            'Please refer to README.md.'
+
+        c = config
+        assert c and c.get('fargate', None), 'EC2 Server Configuration was not provided in "{}". ' \
+                                        'Please refer to README.md'.format(config_path)
+
+        top_level = c.get('fargate')
+        assert len(top_level) > 0, 'Component Configuration was not provided in "{}". ' \
+                                        'Please refer to README.md'.format(config_path)
+        assert isinstance(top_level, dict), 'Component Configuration was malformed in "{}". ' \
+            'Expected dict, found {}'.format(config_path, top_level.__class__.__name__)
+
+        for component_key, comp_config in top_level.items():
+            assert comp_config.get('service_name') and isinstance(comp_config['service_name'], str), \
+                'comp {}: Service name setting is required and must be of type string. Found: {}'.format(component_key, comp_config.get('service_name'))
+
+            if comp_config.get('cluster'):
+                assert isinstance(comp_config['service_name'], str), \
+                    'comp {}: ECS cluster must be type string when provided. Found: {}'.format(component_key, comp_config.get('cluster'))
+
+            comp_settings = comp_config.get('settings', {})
+            if comp_settings.get('cpu'):
+                assert comp_settings['cpu'].get('type') == 'enum', \
+                    'comp {}: enum is the only supported type for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type'))
+                incompat_cpu = set(comp_settings['cpu'].get('values', [])).difference(CPU)
+                assert len(incompat_cpu) == 0, 'comp {}: Imcompatible values entry provided for cpu setting config: {}'.format(component_key, ', '.join(map(str,incompat_cpu)))
+
+            if comp_settings.get('memory'):
+                assert comp_settings['memory'].get('type') == 'enum', \
+                    'comp {}: enum is the only supported type for the memory setting. Found: {}'.format(component_key, comp_settings['memory'].get('type'))
+                incompat_mem = set(comp_settings['memory'].get('values', [])).difference(MEM)
+                bound_ex_mem = []
+                if len(incompat_mem) > 0:
+                    for m in incompat_mem:
+                        if m < MEM_LOW or m > MEM_HI or m % MEM_INC != 0:
+                            bound_ex_mem.append(m)
+                    assert len(bound_ex_mem) == 0, 'comp {}: Imcompatible values entry provided for mem setting config: {}'.format(component_key, ', '.join(map(str,bound_ex_mem)))
+        
+            # check environment setting config
+            # TODO?: if environment functionality is expanded, its logic should be moved to encoder-nameval
+            if comp_config.get('environment'):
+                assert isinstance(comp_config['environment'], dict), \
+                    "comp {}: environment setting config was malformed. Expected dict, found {}: {}".format(component_key, comp_config['environment'].__class__.__name__, comp_config['environment'])
+                for en, evd in comp_config['environment'].items():
+                    assert evd.get('type') in ['enum', 'range'], \
+                        "comp {}: Invalid environment variable setting type {} supplied for name {}. Only enum and range are supported".format(
+                            component_key,
+                            evd.get('type'),
+                            en
+                        )
+                    # validate_enum_config()
+                    if evd['type'] == 'enum':
+                        bad_keys = evd.keys() - {'type', 'unit', 'values', 'default'}
+                        assert len(bad_keys) < 1, \
+                            "comp {}: environment enum setting {} config was malformed, contained unknown key(s) {}".format(component_key, en, ', '.join(bad_keys))
+
+                        assert isinstance(evd.get('unit', ''), str), \
+                            "comp {}: environment setting {} unit must be string type when provided. Found {}".format(component_key, en, evd.get('unit').__class__.__name__)
+
+                        assert isinstance(evd.get('values'), list), \
+                            "comp {}: environment setting {} must provide a list of acceptable values. Found: {}".format(component_key, en, evd.get('values'))
+                    # validate_range_config()
+                    # adapted from https://github.com/opsani/servo/blob/4f672b97e430847e827bb122dbf0e2f6e4b95628/encoders/base.py#L83
+                    else:
+                        bad_keys = evd.keys() - {'type', 'unit', 'min', 'max', 'step', 'default'}
+                        assert len(bad_keys) < 1, \
+                            "comp {}: environment range setting {} config was malformed, contained unknown key(s) {}".format(component_key, en, ', '.join(bad_keys))
+
+                        assert isinstance(evd.get('min'), (int, float)), \
+                            'comp {}: environment range setting {} config was malformed; min value is required, must be a number. Found {}.'.format(component_key, en, evd.get('min'))
+                        assert isinstance(evd.get('max'), (int, float)), \
+                            'comp {}: environment range setting {} config was malformed; max value is required, must be a number. Found {}.'.format(component_key, en, evd.get('max'))
+                        assert isinstance(evd.get('step'), (int, float)), \
+                            'comp {}: environment range setting {} config was malformed; step value is required, must be a number. Found {}.'.format(component_key, en, evd.get('step'))
+                        # Optional param, pass if missing
+                        assert isinstance(evd.get('default', 0), (int, float)), \
+                            'comp {}: environment range setting {} config was malformed; default must be a number when provided. Found {}.'.format(component_key, en, evd.get('default'))
+                            
+                        assert evd['min'] <= evd['max'], \
+                            'comp {}: environment range setting {} config was malformed; supplied min is higher than max'.format(component_key, en)
+
+                        if evd['min'] != evd['max']:
+                            assert evd['step'] != 0, \
+                                'comp {}: environment range setting {} config was malformed; step cannot be zero when min != max.'.format(component_key, en)
+                            assert evd['step'] > 0, \
+                                'comp {}: environment range setting {} config was malformed; step must be a positive number.'.format(component_key, en)
+
+                            c = (evd['max'] - evd['min']) / float(evd['step'])
+                            if not math.isclose(c, round(c, 0), abs_tol = 1/1024):
+                                raise Exception(
+                                    'comp {}: environment range setting {} config was malformed; step value must allow to get from {} to {} in equal steps of {}.'.format(
+                                        component_key, en, evd['min'], evd['max'], evd['step']))
+
+
+    def query(self):
+        retComps = {}
+
+        for component_key, comp_config in self.config['fargate'].items():
+            compSettings = comp_config['settings']
+            retSettings = {}
+
+            s_info = self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', 'default'))
+            task_def = self.get_ecs_task_def(s_info['taskDefinition'])
+
+            if compSettings.get('cpu'):
+                cpuSetting = dict(compSettings['cpu'])
+                cpuSetting['value'] = task_def['cpu']
+                if not cpuSetting.get('values'):
+                    cpuSetting['values'] = list(CPU)
+                retSettings['cpu'] = cpuSetting
+
+            if compSettings.get('memory'):
+                memSetting = dict(compSettings['memory'])
+                memSetting['value'] = task_def['memory']
+                if not memSetting.get('values'):
+                    memSetting['values'] = [512, 1024, 2048, 3072] + list(range(MEM_LOW, MEM_HI +1, MEM_INC))
+                retSettings['memory'] = memSetting
+
+            if comp_config.get('environment'):
+                if len(task_def['containerDefinitions']) > 1:
+                    raise Exception("Multiple containers are not supported when environment variables are supplied")
+                
+                container_def = task_def['containerDefinitions'][0]
+                cont_env = { e['name']:e['value'] for e in container_def['environment'] }
+
+                for en, ev in comp_config['environment'].items():
+                    def_val = ev.pop('default', None)
+                    val = cont_env.get(en, def_val)
+                    if val is None:
+                        raise Exception("Environment variable {} had no value in containerDefinitions and no default in config".format(en))
+                    if ev['type'] == 'range':
+                        val = float(val)
+                    
+                    ev['value'] = val
+                    retSettings[en] = ev
+
+            retComps[component_key] = { 'settings': retSettings }
+
+        return {'application':{'components': retComps}}
+
+    def get_ecs_service_info(self, service_name, cluster='default'):
+        response = self.ecs.describe_services(
+            cluster=cluster,
+            services=[ service_name ]
+        )
+
+        if response.get('failures'):
+            self.print_json_error(
+                            'ecs.describe_services()',
+                            "failure",
+                            response['failures']
+                        )
+        if not response.get('services'):
+            raise Exception("Failed to describe service name {} in cluster {}".format(service_name, cluster))
+        if len(response['services']) > 1:
+            raise Exception("ECS service name {} (in cluster {}) returned multiple results: {}".format(service_name, cluster, response))
+        
+        return response['services'][0]
+
+    def get_ecs_task_def(self, taskDefinition):
+        response = self.ecs.describe_task_definition(taskDefinition=taskDefinition)
+        task_def = response.get('taskDefinition')
+        if not task_def:
+            raise Exception("Failed to describe task definition {}. resp: {}".format(taskDefinition, response))
+
+        return task_def
+
+    def adjust(self, data):
+        assert data, 'Received no settings to adjust.'
+        self.progress_message = "adjusting fargate settings"
+        self.progress = 0
+        self.print_progress()
+        for component_key, comp_config in self.config['fargate'].items():
+            setting_input = data['application']['components'].pop(component_key, {}).get('settings')
+            if not setting_input:
+                continue # no settings for this component
+
+            # update task definition based on input
+            s_info = self.get_ecs_service_info(
+                comp_config['service_name'], 
+                comp_config.get('cluster', 'default')
+            )
+            assert s_info.get('launchType') == 'FARGATE', (
+                "Launch type of service not compatible with Fargate servo. Service: {}".format(s_info)
+            )
+
+            task_def = self.get_ecs_task_def(s_info['taskDefinition'])
+            # Remove run-time info
+            task_def.pop('status', None)
+            task_def.pop('taskDefinitionArn', None)
+            task_def.pop('revision', None)
+            # Remove ECS task data not compatible with fargate task definition
+            task_def.pop('requiresAttributes', None)
+            task_def.pop('compatibilities', None) # val=['FARGATE', 'EC2'] even though we require the FARGATE launch type
+
+
+            task_def['cpu'] = str(setting_input.pop('cpu', {}).get('value', task_def['cpu']))
+            task_def['memory'] = str(setting_input.pop('memory', {}).get('value', task_def['memory']))
+
+            # Process env settings, report leftovers with json error
+            if comp_config.get('environment'):
+                if not task_def.get('containerDefinitions'):
+                    raise Exception("comp {}: No container definition found to set environment vars for".format(component_key))
+                if len(task_def['containerDefinitions']) > 1:
+                    raise Exception("comp {}: Multiple containers are not supported when environment variables are supplied".format(component_key))
+                container_def = task_def['containerDefinitions'][0]
+                cur_env = { e['name']: e['value'] for e in container_def['environment'] }
+
+                unknown_settings = []
+                for s_name, s_val in setting_input.items():
+                    if s_name not in comp_config.get('environment', {}).keys():
+                        unknown_settings.append(s_name)
+                        continue
+                    
+                    cur_env[s_name] = str(s_val['value'])
+                container_def['environment'] = [ { 'name': k, 'value': v } for k, v in cur_env.items() ]
+            else:
+                unknown_settings = setting_input.keys()
+
+            if len(unknown_settings) > 0:
+                self.print_json_error(
+                    "none",
+                    "warning",
+                    "component {} input contains unknown setting(s): {}".format(component_key, ', '.join(unknown_settings))
+                )
+
+            response = self.ecs.register_task_definition(**task_def)
+            assert response and response.get('taskDefinition'), (
+                "Failed to register new task definition. Response: {}".format(response)
+            )
+
+            response = self.ecs.update_service(
+                cluster=comp_config.get('cluster', 'default'),
+                service=comp_config['service_name'],
+                taskDefinition=response['taskDefinition']['taskDefinitionArn']
+            )
+            assert response and response.get('service'), (
+                "Failed to update fargate service. Response: {}".format(response)
+            )
+            
+            time.sleep(5)
+            if not self.wait_for_condition_or_timeout(
+                evaluator=lambda : self.verify_ecs_service_desired_capacity(comp_config['service_name'], comp_config.get('cluster', 'default')),
+                timeout=comp_config.get('timeout_service_desired_count', 1200)
+            ):
+                raise Exception('Timed out waiting for service update. Service state: {}'.format(self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', 'default'))))
+
+            # TODO?: custom health check?
+        
+        self.progress = 100
+        self.progress_message = "adjust complete"
+        self.print_progress()
+            
+        # Sleep for 15 seconds then check evaluator. Return False when tiemout expires, True when condition passes
+    def wait_for_condition_or_timeout(self, evaluator, timeout, pre_check = False):
+        if pre_check:
+            finished = evaluator()
+        else:
+            finished = False
+        start_time = time.time()
+        heartbeat_counter = 0
+        self.print_progress()
+        while not finished:
+            if time.time() - start_time > timeout:
+                return False
+            time.sleep(15)
+
+            finished = evaluator()
+
+            heartbeat_counter = (heartbeat_counter + 1) % 2
+            if heartbeat_counter == 0:
+                self.print_progress()
+        
+        if heartbeat_counter == 1:
+            self.print_progress()
+
+        return True
+
+    def verify_ecs_service_desired_capacity(self, service_name, cluster='default'):
+        s = self.get_ecs_service_info(service_name, cluster)
+
+        # Service update triggers a new deployment, verify counts of latest deployment
+        deployments = s.get('deployments')
+        if not deployments:
+            raise Exception('Service contains no deployments for verify: {}'.format(s))
+        d = sorted(deployments, key=lambda dep: dep['createdAt'], reverse=True)[0]
+        if d.get('pendingCount'):
+            return False
+        
+        if d.get('runningCount') != d.get('desiredCount'):
+            return False
+        
+        return True
+        
+

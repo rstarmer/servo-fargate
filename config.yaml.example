@@ -1,0 +1,35 @@
+fargate:
+  co-http:
+    # cluster: default # Optional ECS cluster, assumes default cluster if no value is provided
+    service_name: co-http # Required, identifies fargate deployment to be tuned
+    timeout_service_desired_count: 600 # Max time to wait for updated service to reach desired number of instances
+    settings: # Used to update fargate task definition
+      cpu:
+        type: 'enum'
+        unit: 'CPU'
+        values:
+        - 256
+        - 512
+        - 1024
+      memory:
+        type: 'enum'
+        unit: 'MB'
+        values: # Used to constrain posible Mem values. Defaults to all valid memory increments listed here: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
+        - 512
+        - 1024
+        - 2048
+    environment:
+      GOGC: # example var, co-http runs a Go webserver and this tunes its garbage collector
+        type: 'range'
+        min: 50
+        max: 300
+        step: 10
+        default: 100
+      TEST:
+        type: 'enum'
+        unit: 'none'
+        default: 'A'
+        values:
+        - 'A'
+        - 'B'
+        - 'C'
