@@ -26,6 +26,9 @@ ADD https://raw.githubusercontent.com/opsani/servo/master/servo \
     https://raw.githubusercontent.com/opsani/servo-agg/master/util.py \
     /servo/
 
+ADD https://raw.githubusercontent.com/opsani/servo/master/measure.py \
+    /servo/measure.d/measure.py
+    
 ADD https://raw.githubusercontent.com/opsani/servo-ab/master/measure \
     /servo/measure.d/ab
 
