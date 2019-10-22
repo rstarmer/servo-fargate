@@ -163,14 +163,14 @@ class FargateDriver(Adjust):
 
             if compSettings.get('cpu'):
                 cpuSetting = dict(compSettings['cpu'])
-                cpuSetting['value'] = task_def['cpu']
+                cpuSetting['value'] = int(task_def['cpu'])
                 if not cpuSetting.get('values'):
                     cpuSetting['values'] = list(CPU)
                 retSettings['cpu'] = cpuSetting
 
             if compSettings.get('memory'):
                 memSetting = dict(compSettings['memory'])
-                memSetting['value'] = task_def['memory']
+                memSetting['value'] = int(task_def['memory'])
                 if not memSetting.get('values'):
                     memSetting['values'] = [512, 1024, 2048, 3072] + list(range(MEM_LOW, MEM_HI +1, MEM_INC))
                 retSettings['memory'] = memSetting
