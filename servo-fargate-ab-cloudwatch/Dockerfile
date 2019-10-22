@@ -22,23 +22,23 @@ ADD https://raw.githubusercontent.com/opsani/servo/master/servo \
     https://raw.githubusercontent.com/opsani/servo/master/adjust.py \
     https://raw.githubusercontent.com/opsani/servo/master/measure.py \
     https://raw.githubusercontent.com/kumulustech/servo-fargate/master/adjust \
-    https://raw.githubusercontent.com/kumulustech/servo-agg/master/measure \
+    https://raw.githubusercontent.com/opsani/servo-magg/master/measure \
     https://raw.githubusercontent.com/opsani/servo-agg/master/util.py \
     /servo/
 
 ADD https://raw.githubusercontent.com/opsani/servo-ab/master/measure \
-    /servo/measure.d/01ab
+    /servo/measure.d/ab
 
 ADD https://raw.githubusercontent.com/kumulustech/servo-cloudwatch/master/measure \
-    /servo/measure.d/02cloudwatch
+    /servo/measure.d/cloudwatch
 
-RUN chmod a+rwx /servo/adjust /servo/measure /servo/servo /servo/measure.d/01ab /servo/measure.d/02cloudwatch
+RUN chmod a+rwx /servo/adjust /servo/measure /servo/servo /servo/measure.d/ab /servo/measure.d/cloudwatch
 RUN chmod a+rw /servo/measure.py /servo/adjust.py
 
 # TODO: remove when testing complete
-RUN sed -i 's/30,         # warmup time in seconds/0,         # warmup time in seconds/' measure.d/01ab
+RUN sed -i 's/30,         # warmup time in seconds/0,         # warmup time in seconds/' measure.d/ab
 # Default value works in this case, uncomment to adjust ab load duration
-# RUN sed -i 's/180,         # time limit in seconds/180,         # time limit in seconds/' measure.d/01ab
+# RUN sed -i 's/180,         # time limit in seconds/180,         # time limit in seconds/' measure.d/ab
 
 ENV PYTHONUNBUFFERED=1
 
