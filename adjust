@@ -351,4 +351,6 @@ class FargateDriver(Adjust):
         
         return True
         
-
+if __name__ == '__main__':
+    driver = FargateDriver(cli_desc=DESC, supports_cancel=HAS_CANCEL, version=VERSION)
+    driver.run()
