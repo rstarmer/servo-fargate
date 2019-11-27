@@ -1,6 +1,7 @@
 fargate:
   co-http:
     # cluster: default # Optional ECS cluster, assumes default cluster if no value is provided
+    # NOTE cluster can also be specified via the environment variable 'FARGATE_CLUSTER', but the value in the config file takes precedence when specified
     service_name: co-http # Required, identifies fargate deployment to be tuned
     timeout_service_desired_count: 600 # Max time to wait for updated service to reach desired number of instances
     settings: # Used to update fargate task definition

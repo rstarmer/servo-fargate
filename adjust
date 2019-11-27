@@ -176,7 +176,7 @@ class FargateDriver(Adjust):
             compSettings = comp_config['settings']
             retSettings = {}
 
-            s_info = self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', 'default'))
+            s_info = self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default')))
             task_def = self.get_ecs_task_def(s_info['taskDefinition'])
 
             if compSettings.get('cpu'):
@@ -270,7 +270,7 @@ class FargateDriver(Adjust):
             # update task definition based on input
             s_info = self.get_ecs_service_info(
                 comp_config['service_name'], 
-                comp_config.get('cluster', 'default')
+                comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default'))
             )
             assert s_info.get('launchType') == 'FARGATE', (
                 "Launch type of service not compatible with Fargate servo. Service: {}".format(s_info)
@@ -322,7 +322,7 @@ class FargateDriver(Adjust):
             )
 
             response = self.ecs.update_service(
-                cluster=comp_config.get('cluster', 'default'),
+                cluster=comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default')),
                 service=comp_config['service_name'],
                 taskDefinition=response['taskDefinition']['taskDefinitionArn']
             )
@@ -332,10 +332,10 @@ class FargateDriver(Adjust):
             
             time.sleep(5)
             if not self.wait_for_condition_or_timeout(
-                evaluator=lambda : self.verify_ecs_service_desired_capacity(comp_config['service_name'], comp_config.get('cluster', 'default')),
+                evaluator=lambda : self.verify_ecs_service_desired_capacity(comp_config['service_name'], comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default'))),
                 timeout=comp_config.get('timeout_service_desired_count', 1200)
             ):
-                raise Exception('Timed out waiting for service update. Service state: {}'.format(self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', 'default'))))
+                raise Exception('Timed out waiting for service update. Service state: {}'.format(self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default')))))
 
             # TODO?: custom health check?
         
