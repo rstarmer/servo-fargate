@@ -3,7 +3,7 @@ import pytest
 import sys
 import io
 
-from adjust import FargateDriver, DESC, HAS_CANCEL, VERSION
+from adjust_driver import FargateDriver, DESC, HAS_CANCEL, VERSION
 
 adjust_json_stdin = '''\
 {

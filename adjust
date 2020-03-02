@@ -8,11 +8,7 @@ import subprocess
 import yaml
 import boto3
 
-# if this is running in the pytest suite, symlink destination names have been adjusted to make importing easier
-if 'pytest' in sys.modules:
-    from base_adjust import Adjust  # adjust.py renamed to base adjust to allow this file to be imported normally for testing
-else:
-    from adjust import Adjust
+from adjust import Adjust
 
 DESC = "EC2 Fargate adjust driver for Opsani Optune"
 VERSION = "0.0.1"
@@ -79,7 +75,7 @@ class FargateDriver(Adjust):
                 'comp {}: Service name setting is required and must be of type string. Found: {}'.format(component_key, comp_config.get('service_name'))
 
             if comp_config.get('cluster'):
-                assert isinstance(comp_config['service_name'], str), \
+                assert isinstance(comp_config['cluster'], str), \
                     'comp {}: ECS cluster must be type string when provided. Found: {}'.format(component_key, comp_config.get('cluster'))
 
             comp_settings = comp_config.get('settings', {})
@@ -244,7 +240,7 @@ class FargateDriver(Adjust):
                             response['failures']
                         )
         if not response.get('services'):
-            raise Exception("Failed to describe service name {} in cluster {}".format(service_name, cluster))
+            raise Exception("Failed to describe service name {} in cluster {}. Response: {}".format(service_name, cluster, response))
         if len(response['services']) > 1:
             raise Exception("ECS service name {} (in cluster {}) returned multiple results: {}".format(service_name, cluster, response))
         

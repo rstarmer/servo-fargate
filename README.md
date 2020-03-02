@@ -4,7 +4,7 @@ _Optune adjust driver for ECS Fargate services_
 
 This driver presently updates the 'cpu' and 'memory' settings of an ECS fargate service by copying its task definition into a new task definition revision only updating the desired parameters. Once the revision is created, the configured service (see config.yaml.example) is updated to reference the new revision. 
 
-Further, can also supply/modify environment variables of the container definition contained in the task definition of the ECS service. This is done via the section ~environment~ which is on the same level as section ~settings~. Only range and enum setting types are supported. Range requires the properties ~min~, ~max~ and ~step~, whereas enum requires a ~values~ property. Both support a human readable 'unit' property and require a default value in cases where the environment variable is not set in the container definition
+Further, can also supply/modify environment variables of the container definition contained in the task definition of the ECS service. This is done via the section `environment` which is on the same level as section `settings`. Only range and enum setting types are supported. Range requires the properties `min`, `max` and `step`, whereas enum requires a `values` property. Both support a human readable 'unit' property and require a default value in cases where the environment variable is not set in the container definition
 
 Once the service is updated, the driver waits and polls the running count of the latest service deployment until the running count matches the desired count (or it times out)
 
@@ -28,8 +28,6 @@ IAM
 - iam:PassRole for ECS Task execution role. This role is required by tasks/services to pull container images and publish container logs to Amazon CloudWatch on your behalf
 
 ## Installation
-
-[WIP] Dockerfile for these instructions
 
 1. Echo optune token into docker secret: `echo -n 'YOUR AUTH TOKEN' | docker secret create optune_auth_token -`
 1. Run `docker build servo/ -t example.com/servo-fargate-ab-cloudwatch`
@@ -59,7 +57,7 @@ Prerequisites:
 Follow these steps:
 
 1. Pull the repository
-1. Copy/symlink `adjust` (no file extension) from this repo's project folder to folder `test/`, rename to `adjust.py`
-1. Copy/symlink `adjust.py` from `https://github.com/opsani/servo/tree/master/` to folder `test/`, rename to `base_adjust.py`
+1. Copy/symlink `adjust` (no file extension) from this repo's project folder to folder `test/`, rename to `adjust_driver.py`
+1. Copy/symlink `adjust.py` from `https://github.com/opsani/servo/tree/master/` to folder `test/`
 1. Source your aws_config.env file containing your AWS service key (or ensure your /home/user/.aws folder has a populated credentials file )
 1. Run `pytest` from the servo-fargate project folder
