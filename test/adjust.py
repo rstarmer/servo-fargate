@@ -1,1 +1,0 @@
-/home/linkous/code/servo-fargate/adjust
