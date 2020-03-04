@@ -1,4 +1,4 @@
-config.yaml
+/config.yaml
 .vscode/settings.json
 test/adjust.py
 test/adjust_driver.py
