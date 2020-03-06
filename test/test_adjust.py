@@ -11,8 +11,8 @@ adjust_json_stdin = '''\
         "components": {
             "co-http": {
                 "settings": {
-                    "cpu": {"value": 256},
-                    "memory": {"value": 512},
+                    "cpu": {"value": "0.25"},
+                    "mem": {"value": "0.5"},
                     "GOGC": {"value": 90},
                     "TEST": {"value": "B"}
                 }

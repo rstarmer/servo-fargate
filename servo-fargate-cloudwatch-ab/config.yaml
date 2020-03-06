@@ -50,15 +50,11 @@ fargate:
     timeout_service_desired_count: 600 # Max time to wait for updated service to reach desired number of instances
     settings: # Used to update fargate task definition
       cpu:
-        type: 'range'
-        unit: 'CPU'
-        min: 256
-        max: 1024
-      memory:
-        type: 'range'
-        unit: 'MB'
-        min: 512
-        max: 2048
+        type: 'enum'
+        values: [ '0.25', '0.5', '1' ]
+      mem:
+        type: 'enum'
+        values: [ '0.5', '1', '2' ]
     environment:
       GOGC: # example var, co-http runs a Go webserver and this tunes its garbage collector
         type: 'range'

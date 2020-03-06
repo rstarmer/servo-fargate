@@ -14,15 +14,10 @@ DESC = "EC2 Fargate adjust driver for Opsani Optune"
 VERSION = "0.0.1"
 HAS_CANCEL = False
 
-CPU = { 256, 512, 1024, 2048, 4096 }
-CPU_MIN = 256
-CPU_MAX = 4096
+CPU = { '0.25', '0.5', '1', '2', '4' }
 
-MEM = { 512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192 }
-MEM_MIN = 512
-MEM_LOW = 4096
-MEM_MAX = 30720
-MEM_INC = 1024
+MEM = { '0.5', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30' }
+
 # CPU_MEM_COMBOS = {
 #     256: lambda mem: mem in [512, 1024, 2048],
 #     512: lambda mem: mem in [1024, 2048, 3072, 4096],
@@ -82,33 +77,18 @@ class FargateDriver(Adjust):
             if comp_settings.get('cpu'):
                 if comp_settings['cpu'].get('type') == 'enum':
                     incompat_cpu = set(comp_settings['cpu'].get('values', [])).difference(CPU)
-                    assert len(incompat_cpu) == 0, 'comp {}: Imcompatible values entry provided for cpu setting config: {}'.format(component_key, ', '.join(map(str,incompat_cpu)))
-                elif comp_settings['cpu'].get('type') == 'range':
-                    assert comp_settings['cpu'].get('min', 0) <= CPU_MAX, 'comp {}: Provided min for cpu setting config would exclude all compatible options: {}'.format(component_key, comp_settings['cpu']['min'])
-                    assert comp_settings['cpu'].get('max', CPU_MAX) >= CPU_MIN, 'comp {}: Provided max for cpu setting config would exclude all compatible options: {}'.format(component_key, comp_settings['cpu']['max'])
-                    assert comp_settings['cpu'].get('max', CPU_MAX) >= comp_settings['cpu'].get('min', CPU_MIN), \
-                        'comp {}: Provided max for cpu setting must be greater than or equal to the provided min or minumum supported cpu value: conf min {} conf max {}'.format(component_key,comp_settings['cpu'].get('min'),comp_settings['cpu'].get('max'))
-                    assert not comp_settings['cpu'].get('step'), 'comp {}: cpu config included step which is not supported by the driver due to inconsitent deltas between the AWS supported values'.format(component_key)
+                    assert len(incompat_cpu) == 0, 'comp {}: Imcompatible values entry provided for cpu setting config (NOTE: values must be str): {}' \
+                        ''.format(component_key, ', '.join(map(str,incompat_cpu)))
                 else:
-                    raise Exception('comp {}: enum and range are the only supported types for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type')))
+                    raise Exception('comp {}: enum is the only supported type for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type')))
 
-            if comp_settings.get('memory'):
-                if comp_settings['memory'].get('type') == 'enum': 
-                    incompat_mem = set(comp_settings['memory'].get('values', [])).difference(MEM)
-                    bound_ex_mem = []
-                    if len(incompat_mem) > 0:
-                        for m in incompat_mem:
-                            if m < MEM_LOW or m > MEM_MAX or m % MEM_INC != 0:
-                                bound_ex_mem.append(m)
-                        assert len(bound_ex_mem) == 0, 'comp {}: Imcompatible values entry provided for memory setting config: {}'.format(component_key, ', '.join(map(str,bound_ex_mem)))
-                elif comp_settings['memory'].get('type') == 'range':
-                    assert comp_settings['memory'].get('min', MEM_MIN) <= MEM_MAX, 'comp {}: Provided min for memory setting config would exclude all compatible options: {}'.format(component_key, comp_settings['memory']['min'])
-                    assert comp_settings['memory'].get('max', MEM_MAX) >= MEM_MIN, 'comp {}: Provided max for memory setting config would exclude all compatible options: {}'.format(component_key,comp_settings['memory']['max'])
-                    assert comp_settings['memory'].get('max', MEM_MAX) >= comp_settings['memory'].get('min', MEM_MIN), \
-                        'comp {}: Provided max for memory setting must be greater than or equal to the provided min or minumum supported memory value: conf min {} conf max {}'.format(component_key,comp_settings['memory'].get('min'),comp_settings['memory'].get('max'))
-                    assert not comp_settings['memory'].get('step'), 'comp {}: memory config included step which is not supported by the driver due to inconsitent deltas between the AWS supported values'.format(component_key)
+            if comp_settings.get('mem'):
+                if comp_settings['mem'].get('type') == 'enum': 
+                    incompat_mem = set(comp_settings['mem'].get('values', [])).difference(MEM)
+                    assert len(incompat_mem) == 0, 'comp {}: Imcompatible values entry provided for memory setting config (NOTE: values must be str): {}' \
+                        ''.format(component_key, ', '.join(map(str,incompat_mem)))
                 else:
-                    raise Exception('comp {}: enum and range are the only supported types for the memory setting. Found: {}'.format(component_key, comp_settings['memory'].get('type')))
+                    raise Exception('comp {}: enum is the only supported type for the memory setting. Found: {}'.format(component_key, comp_settings['mem'].get('type')))
         
             # check environment setting config
             # TODO?: if environment functionality is expanded, its logic should be moved to encoder-nameval
@@ -178,32 +158,29 @@ class FargateDriver(Adjust):
 
             if compSettings.get('cpu'):
                 cpuSetting = dict(compSettings['cpu'])
-                cpuSetting['value'] = int(task_def['cpu'])
-                if cpuSetting['type'] == 'range':
-                    cpuSetting['type'] = 'enum' # Under the hood implement still uses enum, purpose of range support is for config brevity
-                    cpu_conf_min = cpuSetting.pop('min', CPU_MAX)
-                    cpu_conf_max = cpuSetting.pop('max', CPU_MIN)
-                    cpuSetting['values'] = [ cpu for cpu in list(CPU) if cpu >= cpu_conf_min and cpu <= cpu_conf_max ]
-                else: # Handle enum type
-                    if not cpuSetting.get('values'):
-                        cpuSetting['values'] = list(CPU)
+                if not cpuSetting.get('unit'):
+                    cpuSetting['unit'] = 'cores'
+                cpu_val = int(task_def['cpu']) / 1024
+                if cpu_val >= 1: # Remove trailing zero where applicable
+                    cpu_val = int(cpu_val)
+                cpuSetting['value'] = str(cpu_val)
+                if not cpuSetting.get('values'):
+                    cpuSetting['values'] = list(CPU)
 
                 retSettings['cpu'] = cpuSetting
 
-            if compSettings.get('memory'):
-                memSetting = dict(compSettings['memory'])
-                memSetting['value'] = int(task_def['memory'])
-                all_mems = [512, 1024, 2048, 3072] + list(range(MEM_LOW, MEM_MAX +1, MEM_INC))
-                if memSetting['type'] == 'range':
-                    memSetting['type'] = 'enum' # Under the hood implement still uses enum, purpose of range support is for config brevity
-                    mem_conf_min = memSetting.pop('min', MEM_MAX)
-                    mem_conf_max = memSetting.pop('max', MEM_MIN)
-                    memSetting['values'] = [ mem for mem in all_mems if mem >= mem_conf_min and mem <= mem_conf_max ]
-                else: # Handle enum type
-                    if not memSetting.get('values'):
-                        memSetting['values'] = all_mems
+            if compSettings.get('mem'):
+                memSetting = dict(compSettings['mem'])
+                if not memSetting.get('unit'):
+                    memSetting['unit'] = 'GiB'
+                mem_val = int(task_def['memory']) / 1024
+                if mem_val >= 1: # Remove trailing zero where applicable
+                    mem_val = int(mem_val)
+                memSetting['value'] = str(mem_val)
+                if not memSetting.get('values'):
+                    memSetting['values'] = list(MEM)
 
-                retSettings['memory'] = memSetting
+                retSettings['mem'] = memSetting
 
             if comp_config.get('environment'):
                 if len(task_def['containerDefinitions']) > 1:
@@ -282,9 +259,12 @@ class FargateDriver(Adjust):
             task_def.pop('requiresAttributes', None)
             task_def.pop('compatibilities', None) # val=['FARGATE', 'EC2'] even though we require the FARGATE launch type
 
-
-            task_def['cpu'] = str(setting_input.pop('cpu', {}).get('value', task_def['cpu']))
-            task_def['memory'] = str(setting_input.pop('memory', {}).get('value', task_def['memory']))
+            new_cpu = setting_input.pop('cpu', {}).get('value')
+            if new_cpu:
+                task_def['cpu'] = str(int(float(new_cpu) * 1024))
+            new_mem = setting_input.pop('mem', {}).get('value')
+            if new_mem:
+                task_def['memory'] = str(int(float(new_mem) * 1024))
 
             # Process env settings, report leftovers with json error
             if comp_config.get('environment'):
