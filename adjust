@@ -77,7 +77,7 @@ class FargateDriver(Adjust):
             if comp_settings.get('cpu'):
                 if comp_settings['cpu'].get('type') == 'enum':
                     incompat_cpu = set(comp_settings['cpu'].get('values', [])).difference(CPU)
-                    assert len(incompat_cpu) == 0, 'comp {}: Imcompatible values entry provided for cpu setting config (NOTE: values must be str): {}' \
+                    assert len(incompat_cpu) == 0, 'comp {}: Incompatible values entry provided for cpu setting config (NOTE: values must be str): {}' \
                         ''.format(component_key, ', '.join(map(str,incompat_cpu)))
                 else:
                     raise Exception('comp {}: enum is the only supported type for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type')))
@@ -85,7 +85,7 @@ class FargateDriver(Adjust):
             if comp_settings.get('mem'):
                 if comp_settings['mem'].get('type') == 'enum': 
                     incompat_mem = set(comp_settings['mem'].get('values', [])).difference(MEM)
-                    assert len(incompat_mem) == 0, 'comp {}: Imcompatible values entry provided for memory setting config (NOTE: values must be str): {}' \
+                    assert len(incompat_mem) == 0, 'comp {}: Incompatible values entry provided for memory setting config (NOTE: values must be str): {}' \
                         ''.format(component_key, ', '.join(map(str,incompat_mem)))
                 else:
                     raise Exception('comp {}: enum is the only supported type for the memory setting. Found: {}'.format(component_key, comp_settings['mem'].get('type')))
