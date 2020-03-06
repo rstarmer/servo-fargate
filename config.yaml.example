@@ -6,17 +6,11 @@ fargate:
     timeout_service_desired_count: 600 # Max time to wait for updated service to reach desired number of instances
     settings: # Used to update fargate task definition
       cpu: # Used to constrain posible CPU values. Defaults to all valid cpu increments listed here: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
-        type: 'enum' # Note type 'range' is also supported (see mem)
-        unit: 'CPU'
-        values:
-        - 256
-        - 512
-        - 1024
+        type: 'enum'
+        values: [ '0.25', '0.5', '1' ] # NOTE: values must be strings given in units of cores/vCPU (eg. 0.5 is 512 CPU units)
       memory: # Used to constrain posible Memory values. Defaults to all valid memory increments listed here: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
-        type: 'range' # Note type 'enum' is also supported (see cpu)
-        unit: 'MB'
-        min: 512
-        max: 4096
+        type: 'enum'
+        values: [ '0.5', '1', '2' ] # NOTE: values must be strings given in units of GiB (eg. 0.5 is 512 MB)
     environment:
       GOGC: # example var, co-http runs a Go webserver and this tunes its garbage collector
         type: 'range'
