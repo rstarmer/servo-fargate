@@ -233,14 +233,15 @@ class FargateDriver(Adjust):
 
     def adjust(self, data):
         assert data, 'Received no settings to adjust.'
-        self.progress_message = "adjusting fargate settings"
         self.progress = 0
-        self.print_progress()
         for component_key, comp_config in self.config['fargate'].items():
             setting_input = data['application']['components'].pop(component_key, {}).get('settings')
             if not setting_input:
                 continue # no settings for this component
 
+            self.progress_message = "adjusting fargate settings for component {}".format(component_key)
+            self.print_progress()
+            
             # update task definition based on input
             s_info = self.get_ecs_service_info(
                 comp_config['service_name'], 
@@ -352,14 +353,23 @@ class FargateDriver(Adjust):
         deployments = s.get('deployments')
         if not deployments:
             raise Exception('Service contains no deployments for verify: {}'.format(s))
-        d = sorted(deployments, key=lambda dep: dep['createdAt'], reverse=True)[0]
-        if d.get('pendingCount'):
-            return False
+        latestDep = sorted(deployments, key=lambda dep: dep['createdAt'], reverse=True)[0]
+        ready = True
+
+        if latestDep.get('pendingCount'):
+            ready = False
         
-        if d.get('runningCount') != d.get('desiredCount'):
-            return False
+        if latestDep.get('runningCount') != latestDep.get('desiredCount'):
+            ready = False
         
-        return True
+        activeDeps = [d for d in deployments if d['id'] != latestDep['id'] and d['runningCount'] > 0]
+        if activeDeps:
+            ready = False
+
+        self.progress_message = 'waiting for adjustment to complete: new deployment {}/{}, old deployments {}/0'\
+            ''.format(latestDep.get('runningCount'), latestDep.get('desiredCount'), sum([d['runningCount'] for d in activeDeps]))
+
+        return ready
         
 if __name__ == '__main__':
     driver = FargateDriver(cli_desc=DESC, supports_cancel=HAS_CANCEL, version=VERSION)
