@@ -23,6 +23,10 @@ ECS Permissions
 - ecs:RegisterTaskDefinition
 - ecs:UpdateService
 
+ELB
+
+- elasticloadbalancing:DescribeTargetHealth
+
 IAM
 
 - iam:PassRole for ECS Task execution role. This role is required by tasks/services to pull container images and publish container logs to Amazon CloudWatch on your behalf
