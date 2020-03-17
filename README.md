@@ -6,7 +6,7 @@ This driver presently updates the 'cpu' and 'memory' settings of an ECS fargate 
 
 Further, can also supply/modify environment variables of the container definition contained in the task definition of the ECS service. This is done via the section `environment` which is on the same level as section `settings`. Only range and enum setting types are supported. Range requires the properties `min`, `max` and `step`, whereas enum requires a `values` property. Both support a human readable 'unit' property and require a default value in cases where the environment variable is not set in the container definition
 
-Once the service is updated, the driver waits and polls the running count of the latest service deployment until the running count matches the desired count (or it times out)
+Once the service is updated, the driver waits and polls the running count of the latest service deployment until the running count matches the desired count (or it times out). The driver then polls the Elastic Load Balancer Target Groups associated with the service to ensure the number of healthy registered targets also matches the desired count
 
 __Note__ currently, environment variables are only supported on services whose task definition only contains one container definition
 
