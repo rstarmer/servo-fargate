@@ -35,6 +35,7 @@ class FargateDriver(Adjust):
             self.config = self.load_config()
             self.check_config(self.config)
             self.ecs = boto3.client('ecs')
+            self.elb = boto3.client('elbv2')
 
     @staticmethod
     def load_config():
@@ -231,6 +232,13 @@ class FargateDriver(Adjust):
 
         return task_def
 
+    def get_registered_targets(self, targetGroupArn):
+        response = self.elb.describe_target_health(TargetGroupArn=targetGroupArn)
+        if response.get('TargetHealthDescriptions') is None:
+            raise Exception("Failed to get registered targets for group {}. resp: {}".format(targetGroupArn, response))
+
+        return response['TargetHealthDescriptions']
+
     def adjust(self, data):
         assert data, 'Received no settings to adjust.'
         self.progress = 0
@@ -365,6 +373,14 @@ class FargateDriver(Adjust):
         activeDeps = [d for d in deployments if d['id'] != latestDep['id'] and d['runningCount'] > 0]
         if activeDeps:
             ready = False
+
+        if ready:
+            for lb in s.get('loadBalancers'):
+                reg_targs = self.get_registered_targets(lb.get('targetGroupArn'))
+                healthy_targs = [rt for rt in reg_targs if rt['TargetHealth']['State'] == 'healthy']
+                if len(healthy_targs) < latestDep.get('runningCount'):
+                    ready = False
+                    break
 
         self.progress_message = 'waiting for adjustment to complete: new deployment {}/{}, old deployments {}/0'\
             ''.format(latestDep.get('runningCount'), latestDep.get('desiredCount'), sum([d['runningCount'] for d in activeDeps]))
