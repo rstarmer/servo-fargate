@@ -43,18 +43,20 @@ cloudwatch:
       Period: 60
       Stat: Average
       Unit: Seconds
-fargate:
+fargate: # NOTE: assumes OPTUNE_ECS_USE_RANGES is set to true
   co-http:
     # cluster: default # Optional ECS cluster, assumes default cluster if no value is provided
     service_name: co-http # Required, identifies fargate deployment to be tuned
     timeout_service_desired_count: 600 # Max time to wait for updated service to reach desired number of instances
     settings: # Used to update fargate task definition
       cpu:
-        type: 'enum'
-        values: [ '0.25', '0.5', '1' ]
+        min: 0.25
+        max: 1
       mem:
-        type: 'enum'
-        values: [ '0.5', '1', '2' ]
+        min: 0.5
+        max: 2
+      replicas:
+        max: 20
     environment:
       GOGC: # example var, co-http runs a Go webserver and this tunes its garbage collector
         type: 'range'

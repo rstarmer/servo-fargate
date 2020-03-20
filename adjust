@@ -15,8 +15,12 @@ VERSION = "0.0.1"
 HAS_CANCEL = False
 
 CPU = { '0.25', '0.5', '1', '2', '4' }
+CPU_MIN = 0.25
+CPU_MAX = 4
 
 MEM = { '0.5', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30' }
+MEM_MIN = 0.5
+MEM_MAX = 30
 
 # CPU_MEM_COMBOS = {
 #     256: lambda mem: mem in [512, 1024, 2048],
@@ -27,6 +31,7 @@ MEM = { '0.5', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '1
 # }
 
 config_path = os.environ.get('OPTUNE_CONFIG', './config.yaml')
+USE_RANGES = os.environ.get('OPTUNE_ECS_USE_RANGES', False)
 
 class FargateDriver(Adjust):
     def __init__(self, *args, **kwargs):
@@ -74,23 +79,72 @@ class FargateDriver(Adjust):
                 assert isinstance(comp_config['cluster'], str), \
                     'comp {}: ECS cluster must be type string when provided. Found: {}'.format(component_key, comp_config.get('cluster'))
 
-            comp_settings = comp_config.get('settings', {})
+            comp_settings = comp_config.get('settings')
+            if comp_settings is None:
+                comp_settings = {}
             if comp_settings.get('cpu'):
-                if comp_settings['cpu'].get('type') == 'enum':
+                if USE_RANGES:
+                    assert comp_settings['cpu'].get('type', 'range') == 'range', 'comp {}: range is the only supported type for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type'))
+                    assert comp_settings['cpu'].get('min', CPU_MIN) <= CPU_MAX, 'comp {}: Provided min for cpu setting config would exclude all compatible options: {}'.format(component_key, comp_settings['cpu']['min'])
+                    assert comp_settings['cpu'].get('min', CPU_MIN) >= CPU_MIN, 'comp {}: Provided min for cpu setting is lower than the minimum compatible cpu value ({}) for fargate. Found: {}'.format(component_key, CPU_MIN, comp_settings['cpu']['min'])
+                    assert comp_settings['cpu'].get('max', CPU_MAX) >= CPU_MIN, 'comp {}: Provided max for cpu setting config would exclude all compatible options: {}'.format(component_key, comp_settings['cpu']['max'])
+                    assert comp_settings['cpu'].get('max', CPU_MAX) <= CPU_MAX, 'comp {}: Provided max for cpu setting is greater than the maximum compatible cpu value ({}) for fargate. Found: {}'.format(component_key, CPU_MAX, comp_settings['cpu']['max'])
+                    assert comp_settings['cpu'].get('max', CPU_MAX) >= comp_settings['cpu'].get('min', CPU_MIN), \
+                        'comp {}: Provided max for cpu setting must be greater than or equal to the provided min or minumum supported cpu value: conf min {} conf max {}'.format(component_key,comp_settings['cpu'].get('min'),comp_settings['cpu'].get('max'))
+                    assert comp_settings['cpu'].get('step', 0.25) == 0.25, 'comp {}: cpu config does not support step other than 0.25. Found {}'.format(component_key, comp_settings['cpu'].get('step'))
+                else:
+                    assert comp_settings['cpu'].get('type', 'enum') == 'enum', 'comp {}: enum is the only supported type for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type'))
                     incompat_cpu = set(comp_settings['cpu'].get('values', [])).difference(CPU)
                     assert len(incompat_cpu) == 0, 'comp {}: Incompatible values entry provided for cpu setting config (NOTE: values must be str): {}' \
                         ''.format(component_key, ', '.join(map(str,incompat_cpu)))
-                else:
-                    raise Exception('comp {}: enum is the only supported type for the cpu setting. Found: {}'.format(component_key, comp_settings['cpu'].get('type')))
+
+                assert comp_settings['cpu'].get('unit', 'vCPU') == 'vCPU', 'comp {}: cpu config does not support unit other than vCPU. Found {}'.format(component_key, comp_settings['cpu'].get('unit'))
+                if comp_settings['cpu'].get('pinned') is not None:
+                    assert isinstance(comp_settings['cpu']['pinned'], bool), 'comp {}: cpu config pinned setting must be boolean when provided. Found {}'.format(component_key, comp_settings['cpu']['pinned'])
 
             if comp_settings.get('mem'):
-                if comp_settings['mem'].get('type') == 'enum': 
+                if USE_RANGES:
+                    assert comp_settings['mem'].get('type', 'range') == 'range', 'comp {}: range is the only supported type for the memory setting. Found: {}'.format(component_key, comp_settings['mem'].get('type'))
+                    assert comp_settings['mem'].get('min', MEM_MIN) <= MEM_MAX, 'comp {}: Provided min for memory setting config would exclude all compatible options: {}'.format(component_key, comp_settings['mem']['min'])
+                    assert comp_settings['mem'].get('min', MEM_MIN) >= MEM_MIN, 'comp {}: Provided min for memory setting is lower than the minimum compatible memory value ({}) for fargate. Found: {}'.format(component_key, MEM_MIN, comp_settings['mem']['min'])
+                    assert comp_settings['mem'].get('max', MEM_MAX) >= MEM_MIN, 'comp {}: Provided max for memory setting config would exclude all compatible options: {}'.format(component_key,comp_settings['mem']['max'])
+                    assert comp_settings['mem'].get('max', MEM_MAX) <= MEM_MAX, 'comp {}: Provided max for memory setting is greater than the maximum compatible memory value ({}) for fargate. Found: {}'.format(component_key, MEM_MAX,comp_settings['mem']['max'])
+                    assert comp_settings['mem'].get('max', MEM_MAX) >= comp_settings['mem'].get('min', MEM_MIN), \
+                        'comp {}: Provided max for memory setting must be greater than or equal to the provided min or minumum supported memory value: conf min {} conf max {}'.format(component_key,comp_settings['mem'].get('min'),comp_settings['mem'].get('max'))
+                    if comp_settings['mem'].get('step', 0.5) != 0.5:
+                        if comp_settings['mem'].get('min', MEM_MIN) != comp_settings['mem'].get('max', MEM_MAX):
+                            assert comp_settings['mem']['step'] != 0, \
+                                'comp {}: mem range config was malformed; step cannot be zero when min != max.'.format(component_key)
+                            assert comp_settings['mem']['step'] > 0, \
+                                'comp {}: mem range config was malformed; step must be a positive number.'.format(component_key)
+                            c = (comp_settings['mem'].get('max', MEM_MAX) - comp_settings['mem'].get('min', MEM_MIN)) / float(comp_settings['mem']['step'])
+                            if not math.isclose(c, round(c, 0), abs_tol = 1/1024):
+                                raise Exception(
+                                    'comp {}: mem range config was malformed; step value must allow to get from {} to {} in equal steps of {}.'.format(
+                                        component_key, comp_settings['mem'].get('min', MEM_MIN), comp_settings['mem'].get('max', MEM_MAX), comp_settings['mem']['step']))
+                else:
+                    assert comp_settings['mem'].get('type', 'enum') == 'enum', 'comp {}: enum is the only supported type for the memory setting. Found: {}'.format(component_key, comp_settings['mem'].get('type'))
                     incompat_mem = set(comp_settings['mem'].get('values', [])).difference(MEM)
                     assert len(incompat_mem) == 0, 'comp {}: Incompatible values entry provided for memory setting config (NOTE: values must be str): {}' \
                         ''.format(component_key, ', '.join(map(str,incompat_mem)))
-                else:
-                    raise Exception('comp {}: enum is the only supported type for the memory setting. Found: {}'.format(component_key, comp_settings['mem'].get('type')))
-        
+                
+                assert comp_settings['mem'].get('unit', 'GiB') == 'GiB', 'comp {}: mem config does not support unit other than GiB. Found {}'.format(component_key, comp_settings['mem'].get('unit'))
+                if comp_settings['mem'].get('pinned') is not None:
+                    assert isinstance(comp_settings['mem']['pinned'], bool), 'comp {}: mem config pinned setting must be boolean when provided. Found {}'.format(component_key, comp_settings['mem']['pinned'])
+
+            if 'replicas' in comp_settings:
+                rep_setts = {} if comp_settings['replicas'] is None else comp_settings['replicas']
+                assert rep_setts.get('type', 'range') == 'range', 'comp {}: range is the only supported type for the replicas setting. Found: {}'.format(component_key, rep_setts.get('type'))
+                assert rep_setts.get('max'), 'comp {}: replicas config requires max be defined when replicas config is defined. Found: {}'.format(component_key,rep_setts.get('max'))
+                assert rep_setts.get('min', 1) > 0, 'comp {}: replicas config min must be greater than 0 when provided. Found: {}'.format(component_key,rep_setts.get('min'))
+                assert rep_setts['max'] >= comp_settings['replicas'].get('min', 1), \
+                    'comp {}: Provided max for replicas setting must be greater than or equal to the default min or provided min: conf min {} conf max {}'.format(component_key,rep_setts.get('min', 1),comp_settings['mem']['max'])
+                assert rep_setts.get('step', 1) == 1, 'comp {}: replicas config does not support step other than 1. Found {}'.format(component_key, rep_setts.get('step'))
+                
+                if rep_setts.get('pinned') is not None:
+                    assert isinstance(rep_setts['pinned'], bool), 'comp {}: replicas config pinned setting must be boolean when provided. Found {}'.format(component_key, rep_setts['pinned'])
+
+
             # check environment setting config
             # TODO?: if environment functionality is expanded, its logic should be moved to encoder-nameval
             if comp_config.get('environment'):
@@ -151,37 +205,77 @@ class FargateDriver(Adjust):
         retComps = {}
 
         for component_key, comp_config in self.config['fargate'].items():
-            compSettings = comp_config['settings']
+            compSettings = comp_config.get('settings')
+            if compSettings is None:
+                compSettings = {}
             retSettings = {}
 
             s_info = self.get_ecs_service_info(comp_config['service_name'], comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default')))
             task_def = self.get_ecs_task_def(s_info['taskDefinition'])
 
-            if compSettings.get('cpu'):
-                cpuSetting = dict(compSettings['cpu'])
-                if not cpuSetting.get('unit'):
-                    cpuSetting['unit'] = 'cores'
+            if 'cpu' in compSettings:
+                cpuSetting = dict({} if compSettings['cpu'] is None else compSettings['cpu'])
                 cpu_val = int(task_def['cpu']) / 1024
                 if cpu_val >= 1: # Remove trailing zero where applicable
                     cpu_val = int(cpu_val)
-                cpuSetting['value'] = str(cpu_val)
-                if not cpuSetting.get('values'):
-                    cpuSetting['values'] = list(CPU)
+                cpuSetting['unit'] = 'vCPU'
+                if cpuSetting.get('pinned') is None:
+                    cpuSetting['pinned'] = False
+
+                if USE_RANGES:
+                    cpuSetting['value'] = cpu_val
+                    cpuSetting['type'] = 'range'
+                    cpuSetting['step'] = 0.25
+                    if cpuSetting.get('min') is None:
+                        cpuSetting['min'] = CPU_MIN
+                    if cpuSetting.get('max') is None:
+                        cpuSetting['max'] = CPU_MAX
+                else:
+                    cpuSetting['value'] = str(cpu_val)
+                    cpuSetting['type'] = 'enum'
+                    if not cpuSetting.get('values'):
+                        cpuSetting['values'] = list(CPU)
 
                 retSettings['cpu'] = cpuSetting
 
-            if compSettings.get('mem'):
-                memSetting = dict(compSettings['mem'])
-                if not memSetting.get('unit'):
-                    memSetting['unit'] = 'GiB'
+            if 'mem' in compSettings:
+                memSetting = dict({} if compSettings['mem'] is None else compSettings['mem'])
                 mem_val = int(task_def['memory']) / 1024
                 if mem_val >= 1: # Remove trailing zero where applicable
                     mem_val = int(mem_val)
-                memSetting['value'] = str(mem_val)
-                if not memSetting.get('values'):
-                    memSetting['values'] = list(MEM)
+                memSetting['unit'] = 'GiB'
+                if memSetting.get('pinned') is None:
+                    memSetting['pinned'] = False
+
+                if USE_RANGES:
+                    memSetting['value'] = mem_val
+                    memSetting['type'] = 'range'
+                    if memSetting.get('step') is None:
+                        memSetting['step'] = 0.5
+                    if memSetting.get('min') is None:
+                        memSetting['min'] = MEM_MIN
+                    if memSetting.get('max') is None:
+                        memSetting['max'] = MEM_MAX
+                else:
+                    memSetting['value'] = str(mem_val)
+                    memSetting['type'] = 'enum'
+                    if not memSetting.get('values'):
+                        memSetting['values'] = list(MEM)
 
                 retSettings['mem'] = memSetting
+
+            if compSettings.get('replicas') is not None:
+                repSetting = dict(compSettings['replicas'])
+                repSetting['value'] = int(s_info['desiredCount'])
+                repSetting['type'] = 'range'
+                repSetting['step'] = 1
+                if repSetting.get('min') is None:
+                    repSetting['min'] = 1
+                # max is always included in config when replicas config defined
+                if repSetting.get('pinned') is None:
+                    repSetting['pinned'] = False
+
+                retSettings['replicas'] = repSetting
 
             if comp_config.get('environment'):
                 if len(task_def['containerDefinitions']) > 1:
@@ -275,6 +369,11 @@ class FargateDriver(Adjust):
             if new_mem:
                 task_def['memory'] = str(int(float(new_mem) * 1024))
 
+            desired_count = int(s_info['desiredCount'])
+            new_reps = setting_input.pop('replicas', {}).get('value')
+            if new_reps:
+                desired_count = new_reps
+
             # Process env settings, report leftovers with json error
             if comp_config.get('environment'):
                 if not task_def.get('containerDefinitions'):
@@ -310,7 +409,8 @@ class FargateDriver(Adjust):
             response = self.ecs.update_service(
                 cluster=comp_config.get('cluster', os.environ.get('FARGATE_CLUSTER', 'default')),
                 service=comp_config['service_name'],
-                taskDefinition=response['taskDefinition']['taskDefinitionArn']
+                taskDefinition=response['taskDefinition']['taskDefinitionArn'],
+                desiredCount=desired_count
             )
             assert response and response.get('service'), (
                 "Failed to update fargate service. Response: {}".format(response)
