@@ -55,7 +55,6 @@ class FargateDriver(Adjust):
     def check_config(config):
         try:
             ecs_config=subprocess.run(['curl', '-s', 'http://169.254.170.2/{}'.format(os.environ.get('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'))], stdout=subprocess.PIPE).stdout
-            print("ECS Config: {}".format(ecs_config))
         except:
             print("Not on ECS?")
         
